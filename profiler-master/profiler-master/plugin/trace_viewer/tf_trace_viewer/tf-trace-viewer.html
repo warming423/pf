@@ -1,0 +1,1279 @@
+<!--
+@license
+Copyright 2017 The TensorFlow Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+<link rel="import" href="trace_viewer_full.html" />
+
+<!--
+If WebComponents V0 are not available, show a warning regarding Polymer and
+Trace Viewer.
+-->
+<style>
+  html, body {
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 20px;
+  }
+
+  .no-webcomponents-container.hidden {
+    display: none;
+  }
+
+  .no-webcomponents-container {
+    display: flex;
+    justify-content: center;
+    margin-top: 80px;
+    font-family: Roboto, sans-serif;
+  }
+
+  .no-webcomponents-container .title {
+    font-size: 22px;
+    font-weight: bold;
+  }
+
+  .no-webcomponents-container .contents {
+    max-width: 600px;
+  }
+
+  #event-details {
+    float: right;
+    display: flex;
+    /* only display detail panel if content exists, up to 30% width */
+    width: fit-content;
+    max-width: 30%;
+    background-color: #ececec;
+  }
+
+  tr-ui-b-tab-view {
+    height: fit-content;
+    float: left;
+    flex: 1;
+  }
+
+  tr-ui-a-single-thread-slice-sub-view  {
+    flex-direction: column !important;
+  }
+
+  tr-v-ui-scalar-span {
+    float: left;
+  }
+
+  tr-ui-find-control {
+    /* keep consistent with menubar total height 20px */
+    height: 20px;
+  }
+
+  /* Align height of different buttons on the menubar
+   * tr-ui-b-toolbar-button, button.tr-ui-b-dropdown
+   */
+  tr-ui-b-toolbar-button {
+    padding: 2px 0;
+    /* total height = 14px + 2*2padding + 1*2 border = 20px */
+    height: 14px;
+    cursor: pointer;
+  }
+
+  /* Align style with Detail button */
+  #perfetto {
+    background: url("https://perfetto.dev/assets/favicon.png") no-repeat left;
+    background-color: rgb(248, 248, 248);
+    background-size: 14px;
+    padding-left:20px;
+    border: 1px solid rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  #analysis {
+    flex-flow: row nowrap;
+    /* make vertical drag handle and the tabs covering the whole content height */
+    height: fit-content;
+    /* won't cover the whole window with super long content */
+    max-height: 40%;
+  }
+
+  #eventSummaryTable table.tr-ui-b-table {
+    /* Make text content wrap when the container resizes. */
+    overflow-wrap: anywhere;
+
+    /* Table layout fixed is needed since otherwise the td element's width don't
+     * get calculated properly for `resize: horizontal`. We set width to 100% so the table still
+     * dynamically reflows based on window width. */
+    table-layout:fixed;
+    width: 100%;
+  }
+
+  /* Columns in Event Summary Table. */
+  #eventSummaryTable thead.tr-ui-b-table > tr.tr-ui-b-table > td.tr-ui-b-table {
+    /* Allow Event Summary Table Columns width to be resizable */
+    resize: horizontal;
+    min-width: 100px;
+  }
+
+  /* Name Column in Event Summary Table. */
+  #eventSummaryTable thead.tr-ui-b-table > tr.tr-ui-b-table > td.tr-ui-b-table:first-child {
+    min-width: 350px;
+    width: 500px;
+    max-width: 900px;
+  }
+
+  #eventSummaryTable tr-ui-a-analysis-link {
+    /* Override Catapult CSS which sets this as no-wrap preventing resizing the HTML element. */
+    white-space: normal;
+  }
+
+  tr-ui-a-generic-object-view {
+    /* Help break the long op name */
+    overflow-wrap: anywhere;
+  }
+
+</style>
+
+<div class="no-webcomponents-container hidden">
+  <div class="contents">
+    <div class="title">The trace viewer is currently unavailable.</div>
+    <p>
+      For more details, see
+      <a
+        href="https://github.com/tensorflow/tensorboard/issues/3209"
+        rel="noopener"
+        target="_blank"
+        >this issue</a
+      >.
+    </p>
+    <br />
+    <br />
+    <p>
+      If you are running a Chromium-based browser, one workaround is to download
+      your data as JSON and load it in your browser's viewer at
+      "about://tracing". This run's data can be found here:
+    </p>
+  </div>
+</div>
+
+<script>
+  const canUseWebComponentsV0 =
+    typeof document.registerElement === 'function' &&
+    typeof Element.prototype.createShadowRoot === 'function';
+  if (!canUseWebComponentsV0) {
+    const containerEl = document.querySelector('.no-webcomponents-container');
+    const contentsEl = document.querySelector(
+      '.no-webcomponents-container .contents'
+    );
+    containerEl.classList.remove('hidden');
+
+    const currentURL = new URL(window.location.href);
+    const relativeTraceURL = currentURL.searchParams.get('trace_data_url');
+    const traceURL = new URL(relativeTraceURL, window.location.href).toString();
+
+    const profileDataLink = document.createElement('i');
+    profileDataLink.textContent = `${traceURL}`;
+    contentsEl.appendChild(profileDataLink);
+  }
+</script>
+
+<!--
+tf-trace-viewer is the frontend entry point for Trace Viewer on TensorBoard.
+
+The server serves the trace viewer app at a separate endpoint. TensorBoard
+dashboard would integrate trace viewer app using iframe.
+-->
+<style>
+  tr-ui-timeline-view {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+  }
+  /* The "throbber": a spinning loading indicator */
+  #throbber-initial,
+  #throbber {
+    /* Position: top right of the page, non-blocking to the trace events exploration */
+    position: fixed;
+    top: 64px;
+    right: 48px;
+    border: 5px solid #fafafa;
+    border-radius: 50%;
+    border-top: 5px solid #e6e6e6; /* control bar background color */
+    width: 16px;
+    height: 16px;
+    -webkit-animation: spin 1s linear infinite; /* Safari */
+    animation: spin 1s linear infinite;
+    z-index: 10;
+    /* Hide the throbber when it's inactive */
+    opacity: 0;
+  }
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  #throbber-initial.active,
+  #throbber.active {
+    opacity: 1;
+    /* Wait a short time before showing the throbber (no delay for hiding). */
+    transition-delay: 0.3s;
+  }
+
+  #throbber-initial {
+    /* Put intial loading throbber on page center for better visibility */
+    top: 20%;
+    left: 50%;
+    margin-left: -128px;
+    width: 64px;
+    height: 64px;
+    border: 14px solid #fafafa;
+    border-radius: 50%;
+    border-top: 14px solid #e6e6e6; /* control bar background color */
+  }
+</style>
+<script src="tf-trace-viewer-helper.js"></script>
+<script>
+  'use strict';
+
+  /* tf-trace-viewer will work in two modes: static mode and streaming mode.
+   * in static mode, data are load at 'ready' time,
+   * in streaming mode, data are load on demand when resolution and view port is changed.
+   * static mode limit the amount of trace that we can collect and show to the users.
+   */
+  Polymer({
+    is: 'tf-trace-viewer',
+    properties: {
+      // The URL of hosts data. Provided by caller via URL parameter.
+      hostsDataUrl: {
+        type: String,
+        value: null,
+      },
+      // The URL of trace data. Provided by caller via URL parameter.
+      traceDataUrl: {
+        type: String,
+        value: null,
+      },
+      // _traceData is used for static mode.
+      _traceData: {
+        type: Object,
+        observer: '_traceDataChanged',
+      },
+      _traceViewer: Object,
+      _traceContainer: Object,
+      _traceModel: Object,
+      _throbber: Object,
+      _eventDetails: Object,
+      _isStreaming: {type: Boolean, value: false},
+      _isOss: {type: Boolean, value: false},
+      _loadedRange: Object,
+      _loadedTraceEents: Object,
+      _fullBounds: Object,
+      _isLoading: {type: Boolean, value: false},
+      _dirty: {type: Boolean, value: false},
+      _tasks: Object,
+      _model: Object,
+      _resolution: {type: Number, value: 1000},
+      _filteredByVisibility: {type: Boolean, value: false},
+      _dataRegenerated: {type: Boolean, value: false},
+      _isInitialLoad: {type: Boolean, value: true},
+      _replaceModel: {type: Boolean, value: true},
+      _hosts: {type: Array, value: []},
+      _showFilterForm: {type: Boolean, value: false},
+    },
+
+    ready: function() {
+      // Initiate the trace viewer app.
+      this._traceContainer = document.createElement('track-view-container');
+      this._traceContainer.id = 'track_view_container';
+
+      this._traceViewer = document.createElement('tr-ui-timeline-view');
+      this._traceViewer.track_view_container = this._traceContainer;
+      Polymer.dom(this._traceViewer).appendChild(this._traceContainer);
+
+      this._traceViewer.brushingStateController.addEventListener(
+        'change', this.onSelectionChange.bind(this));
+
+      // Override the default behavior for find fitler such that pressing find
+      // previous, find next which cycles through events in the search filter results
+      // will zoom and focus the event in the timeline.
+      const boundFindFocusChanged =
+          this._traceViewer.brushingStateController.findFocusChangedTo.bind(
+              this._traceViewer.brushingStateController);
+      this._traceViewer.brushingStateController.findFocusChangedTo =
+          (currentFocus) => {
+            boundFindFocusChanged(currentFocus);
+            this._traceViewer.trackView.zoomToSelection();
+          };
+
+      this._traceViewer.id = 'trace-viewer';
+      this._traceViewer.viewTitle = '';
+      this._traceViewer.globalMode = false;
+
+      this._throbber = document.createElement('div');
+      this._throbber.id = 'throbber-initial';
+
+      Polymer.dom(this.root).appendChild(this._traceViewer);
+      Polymer.dom(this.root).appendChild(this._throbber);
+
+      this._resolution = this._resolutionFromViewerWidth(this._traceViewer.clientWidth);
+      this._selectedHostIndexes = this._getInitialSelectedHostIndexes();
+      // Retrieve the URL of trace data.
+      var query = new URL(window.location.href);
+      query.searchParams.forEach(function(value, key, searchParams) {
+        if (key === 'trace_data_url') {
+          this.traceDataUrl = value;
+          if (this.traceDataUrl) {
+            try {
+              traceViewerLink = new URL(window.location.origin + this.traceDataUrl);
+              this._sessionId = traceViewerLink.searchParams.get('session_id');
+            } catch(err) {  // not fatal.
+              console.log('cannot find session id');
+            }
+          }
+        } else if (key === 'is_streaming') {
+          this._isStreaming = value === 'true';
+        } else if (key === 'is_oss') {
+          this._isOss = value === 'true';
+        } else if (key === 'hosts_data_url') {
+          this.hostsDataUrl = value;
+        } else if (key === 'resolution') {
+          this._resolution = Number(value);
+        } else if (key === 'show_filter_form' || key === 'enable_filter') {
+          this._showFilterForm = value === 'true';
+        }
+      }.bind(this));
+
+      if (!this.traceDataUrl) {
+        this._displayOverlay('Trace Viewer', 'Trace data URL is not provided.');
+        return null;
+      }
+      this._init();
+      this._adjustUI();
+
+      window.addEventListener('load', function(e) {
+        element = document.getElementById('analysis');
+        // add a vertical divider as child.
+        verticalDivider = document.createElement('tr-ui-b-drag-handle');
+        element.appendChild(verticalDivider);
+        // add a event details pane as child.
+        this._eventDetails = document.createElement('div');
+        this._eventDetails.id = 'event-details';
+        this._eventDetails.style = 'display: block;';
+        element.appendChild(this._eventDetails);
+        // associate divider with event details pane.
+        verticalDivider.horizontal = false;
+        verticalDivider.target = this._eventDetails;
+      }.bind(this));
+      // Hide chromium codesearch link reduce the confusion
+      window.addEventListener('click', function(e) {
+        element = document.getElementById('codesearchLink');
+        if (element) {
+          element.setAttribute('style', 'display: none');
+        }
+      }.bind(this));
+    },
+
+    _sessionId: string = '',
+    _selectedDeviceIds: null,
+    _devices: null,
+    _selectedHostIndexes: [0],
+
+    // Way to get selectedHostIndexes with legacy host filter
+    _getSelectedHostIndexesFromURL: function() {
+      const hostIndexParam = new URL(window.parent.location.href).searchParams?.get('host_index') || '';
+      const selectedHostIndexes = hostIndexParam.split(',').map(index => Number(index));
+      return selectedHostIndexes.length ? selectedHostIndexes : [0];
+    },
+
+    // Way to get selectedHostIndexes with revamped host filter
+    _getSelectedHostIndexesFromURI: function() {
+      const traceViewerLink = new URL(window.location.origin + this.traceDataUrl);
+      return (traceViewerLink.searchParams.get('hosts') || '').split(',');
+   },
+
+   _getInitialSelectedHostIndexes: function() {
+      return this._showFilterForm ? this._getSelectedHostIndexesFromURI() : this._getSelectedHostIndexesFromURL();
+    },
+
+    _getSelectedHostIndexes: function() {
+      // When using legacy host selector, selectedHostIndexes will be reactively updated
+      return this._showFilterForm ? this._getSelectedHostIndexesFromURI() : this._selectedHostIndexes;
+    },
+
+    _getSelectedHosts() {
+        if (this._showFilterForm) {
+          // host-selector does not exist, this._hosts is not fetched
+          const traceViewerLink = new URL(window.location.origin + this.traceDataUrl);
+          return (traceViewerLink.searchParams.get('hosts') || '').split(',');
+        } else {
+          // has valid this._hosts
+          const selectedHosts = [];
+          this._hosts.forEach((host, index) => {
+              if (this._selectedHostIndexes.includes(index)) {
+                selectedHosts.push(host);
+              }
+          })
+          return selectedHosts;
+        }
+    },
+
+    _convertTimeToCycles: function(e) {
+      if (this._tasks === undefined || this._tasks.length === 0) return;
+      freq = this._tasks[0].sparse_core_freq_hz;
+      if (freq === 0) return;
+      var subpane = document.getElementById("content");
+      var table = subpane.getElementsByTagName("table")[0];
+      var rows = table.rows;
+      for (var i = 0; i < rows.length; i++) {
+        var firstColumn = rows[i].cells[0];
+        if (firstColumn.textContent === "Wall Duration") {
+          if (rows[i].cells[1].textContent.includes("/")) break;  // don't append twice.
+          var cycles = e.duration * freq / 1000.0;  // duration is in milliseconds.
+          rows[i].cells[1].appendChild(
+            document.createTextNode(" / " + cycles.toFixed(2) + " cycles"));
+          break;
+        }
+      }
+    },
+
+    createCrossToolLink: function(toolName, toolLabel, params, text) {
+      const toolLink =
+            new URL(`${window.location.origin}/${toolName}/${this._sessionId}`);
+      for (const [key, value] of Object.entries(params)) {
+        toolLink.searchParams.append(key, value);
+      }
+      const toolLinkElement = document.createElement('div');
+      toolLinkElement.innerHTML = `${toolLabel}: <a href="${toolLink.href}" target="_blank">${text}</a>`;
+      this._eventDetails.appendChild(toolLinkElement);
+      toolLinkElement.addEventListener('click', () => {
+            window.gtag && window.gtag('event', 'tv-hlo-click', {
+              'screen_name': 'trace viewer',
+              'event_category': 'click',
+              'event_label': `${toolName}_link`,
+              'event_variable': toolLink.href,
+            });
+          });
+    },
+
+    onSelectionChange: function(e) {
+      if (!this._sessionId) return;
+      this._eventDetails.innerHTML = '<div id="event-details" ' +
+            'style="display: block;"></div>';
+      events = this._traceViewer.brushingStateController.currentBrushingState.selection;
+      if (events === undefined) return;
+      if (events.length != 1) return;
+
+      for (const event of events) {  // only loop once.
+        var currentThread = event.parentContainer;
+        var currentProcess = currentThread.parent;
+        var hloOp;
+        // DarwiNN layer has a long layer identifier, thus no chance to be conflict with other systems.
+        const darwinn_layer = ['Compute Utilization/Roofline Efficiency', 'Data motion layers utilization'].includes(event.parentContainer.name);
+        const xla_ops = ('XLA Ops' === event.parentContainer.name);
+        if (xla_ops || darwinn_layer) {
+          var hloOp = event.title;
+          if (darwinn_layer) {
+            hloOp = event.args?.Name;
+          }
+          var hloModule = 'default';
+          for (t in currentProcess.threads) {
+            var thread = currentProcess.threads[t];
+            if (thread.name != 'XLA Modules') continue;
+            // Perform a linear search for containing module, because we are not expecting too
+            // many modules per session. But binary search is possible here because the modules
+            // array seems sorted.
+            for (const module of thread.sliceGroup.slices) {
+              if (module.start < event.start && module.start + module.duration > event.start) {
+                hloModule = module.title;
+                break;
+              }
+            }
+          }
+          // Add Graph Viewer link per event selection
+          const graphViewParams = {"node_name": hloOp};
+          if (hloModule != 'default') {
+            graphViewParams["module_name"] = hloModule;
+          }
+          const graphViewText = `see hlo graph for ${hloOp} @ ${hloModule}`;
+          this.createCrossToolLink("graph_viewer", "Graph Viewer", graphViewParams, graphViewText);
+          // Add Hlo Stats link per event selection
+          const opStatsParams = {
+            "hlo_op_name": hloOp,
+            "program_id": hloModule,
+          };
+          const opStatsText = `see hlo stats for ${hloOp} @ ${hloModule}`;
+          this.createCrossToolLink("hlo_stats", "Hlo Stats", opStatsParams, opStatsText);
+          // Add Roofline Model link per event selection
+          const rooflineText = `see op level analysis for ${hloOp}`;
+          this.createCrossToolLink("roofline_model", "Roofline Model", {"roofline_op_name": hloOp}, rooflineText);
+        }
+        // For `TfrtModelRun` event, add links to the associated MLIR graphs.
+        if (event.title.includes("TfrtModelRun")) {
+          // First link is for TF MLIR.
+          {
+            const graphViewLink =
+                  new URL(window.location.origin + '/graph_viewer.json');
+            graphViewLink.searchParams.append("session_id", "xsymbol");
+            graphViewLink.searchParams.append("symbol_id", event.args.tf_symbol_uid);
+            graphViewLink.searchParams.append("symbol_type", "MLIR_MODULE");
+            graphViewLink.searchParams.append("type", "pbtxt");
+            const graphViewLinkElement = document.createElement('div');
+            graphViewLinkElement.innerHTML = 'Graph Viewer:<a href="' + graphViewLink.href +
+                  '" target="_blank"> see the TF MLIR graph </a>';
+            this._eventDetails.appendChild(graphViewLinkElement);
+          }
+          // Second link is for TFRT MLIR.
+          {
+            const graphViewLink =
+                  new URL(window.location.origin + '/graph_viewer.json');
+            graphViewLink.searchParams.append("session_id", "xsymbol");
+            graphViewLink.searchParams.append("symbol_id", event.args.tfrt_symbol_uid);
+            graphViewLink.searchParams.append("symbol_type", "MLIR_MODULE");
+            graphViewLink.searchParams.append("type", "pbtxt");
+            const graphViewLinkElement = document.createElement('div');
+            graphViewLinkElement.innerHTML = 'Graph Viewer:<a href="' + graphViewLink.href +
+                  '" target="_blank"> see the TFRT MLIR graph </a>';
+            this._eventDetails.appendChild(graphViewLinkElement);
+          }
+        }
+        if (currentProcess.name.includes("SparseCore")) {
+            this._convertTimeToCycles(event);
+        }
+        if ('connected_group_ids' in event.args) {
+          const traceViewerConnectedEventsLink =
+                new URL(window.location.origin + '/trace_viewer/' + this._sessionId);
+          traceViewerConnectedEventsLink.searchParams.append(
+                "selected_group_ids", event.args['connected_group_ids']);
+          this._addSelectedHostIndexToTraceViewerURL(traceViewerConnectedEventsLink);
+          const traceViewerConnectedEventsLinkElement = document.createElement('div');
+          traceViewerConnectedEventsLinkElement.innerHTML = 'Trace Viewer:<a href="' +
+                traceViewerConnectedEventsLink.href +
+                '" target="_blank"> see events for step/group ' +
+                event.args['group_id'] +
+                ' and other steps/groups connected to it';
+          this._eventDetails.appendChild(traceViewerConnectedEventsLinkElement);
+        } else if ('group_id' in event.args) {
+          const traceViewerStepLink =
+                new URL(window.location.origin + '/trace_viewer/' + this._sessionId);
+          traceViewerStepLink.searchParams.append("selected_group_ids", event.args['group_id']);
+          this._addSelectedHostIndexToTraceViewerURL(traceViewerStepLink);
+          const traceViewerStepLinkElement = document.createElement('div');
+          traceViewerStepLinkElement.innerHTML = 'Trace Viewer:<a href="' + traceViewerStepLink.href +
+                '" target="_blank"> see events ONLY for this step/group ' +
+                event.args['group_id'];
+          this._eventDetails.appendChild(traceViewerStepLinkElement);
+        }
+      }
+    },
+
+    /**
+     *************************************************************
+     * BEGIN - Functions only used when trace filter form disabled
+     *************************************************************
+     */
+    _updateUrlHostIndex: function(selectedHostIndexes) {
+      const queryParams = new URLSearchParams(window.parent.location.search);
+      if (selectedHostIndexes.length) {
+        queryParams.set('host_index', selectedHostIndexes.join(','));
+      } else {
+        queryParams.delete('host_index');
+      }
+      // Only pushes a new state to history, won't reload the page
+      const url = `${window.location.origin}/trace_viewer/${this._sessionId}?${queryParams.toString()}`;
+      window.parent.history.pushState({}, '', url);
+    },
+
+    _onSelectedHostIndexesChange: function() {
+      this._updateUrlHostIndex(this._selectedHostIndexes);
+      // When the host changes, we need to clear the Process Filter Dropdown
+      // since it contains devices (pids) associated with the previous host.
+      this._clearProcessList();
+    },
+
+    _createHostFilter: function() {
+      hosts = this._hosts || [];
+      if (hosts.length <= 1) {
+        return;
+      }
+
+      const hostSelector = document.createElement('tr-ui-b-dropdown');
+      hostSelector.setAttribute('label', 'Hosts');
+      hostSelector.setAttribute('name', 'host');
+      hostSelector.setAttribute('id', 'host_selector');
+      const hostsDialog = hostSelector.getElementsByTagName('dialog')[0];
+      const hostOptionCheckboxes = [];
+      const updateAllHostsSelection = (checked) => {
+        for (const hostOptionCheckbox of hostOptionCheckboxes) {
+          hostOptionCheckbox.checked = checked;
+        }
+        this._selectedHostIndexes = checked ? Array.from(Array(this._hosts.length).keys()) : [];
+        this._onSelectedHostIndexesChange();
+      };
+
+      hostsDialog.appendChild(tr.ui.b.createButton('Check All', () => {
+        updateAllHostsSelection(true);
+
+      }));
+      hostsDialog.appendChild(tr.ui.b.createButton('Check None', () => {
+        updateAllHostsSelection(false);
+      }));
+      const loadButton = hostsDialog.appendChild(tr.ui.b.createButton('Load', () => {
+        this._loadTrace(null, /* replaceModel= */ true);  // reload data.
+      }));
+      loadButton.setAttribute('style', loadButton.getAttribute('style') + ';cursor:pointer;');
+      for (const [index, host] of hosts.entries()) {
+        const hostOptionCheckbox = tr.ui.b.createCheckBox(undefined, undefined, undefined,
+            true, host);
+
+        hostOptionCheckbox.checked = this._selectedHostIndexes.includes(index);
+        hostOptionCheckbox.addEventListener('change', () => {
+          const checked = hostOptionCheckbox.checked;
+          const hostName = hostOptionCheckbox.textContent;
+          const hostIndex = hosts.findIndex(host => host === hostName);
+          const indexOfIndex = this._selectedHostIndexes.findIndex(index => index === hostIndex);
+          if ((indexOfIndex === -1) && checked) {
+            this._selectedHostIndexes.push(hostIndex);
+          }
+          if ((indexOfIndex !== -1) && !checked) {
+            this._selectedHostIndexes.splice(indexOfIndex, 1);
+          }
+          this._onSelectedHostIndexesChange();
+        });
+        hostsDialog.appendChild(hostOptionCheckbox);
+        hostOptionCheckboxes.push(hostOptionCheckbox);
+      }
+      Polymer.dom(this._traceViewer.leftControls).appendChild(hostSelector);
+    },
+
+    _createProcessesFilter: function() {
+      this._traceViewer.updateProcessList_ = this._updateProcessList.bind(this);
+    },
+    /**
+     *************************************************************
+     * END - Functions only used when trace filter form disabled
+     *************************************************************
+     */
+
+    _createDetailFilter: function() {
+      const detailsSelector = document.createElement('tr-ui-b-dropdown');
+      detailsSelector.setAttribute('id', 'details_selector');
+      detailsSelector.style.display = 'none';
+      Polymer.dom(this._traceViewer.leftControls).appendChild(detailsSelector);
+    },
+
+    _hideProcessList: function() {
+      const processDropdown = document.getElementById("process_filter_dropdown");
+      processDropdown.setAttribute('style', 'display:none;');
+    },
+
+    // This function is called when generating trace viewer links given hosts selection
+    _addSelectedHostIndexToTraceViewerURL: function(url) {
+      const selectedHostIndexes = this._getSelectedHostIndexes();
+      if (selectedHostIndexes > 0) {
+        url.searchParams.append("host_index", selectedHostIndexes.join(','));
+      }
+    },
+
+    _perfettoButtonOnclickCallback: function() {
+      const sessionPerfettoUrl = new URL(`/perfetto/${this._sessionId}`, window.location.href);
+      const selectedHosts = this._getSelectedHosts();
+      if (selectedHosts) {
+        sessionPerfettoUrl.searchParams.set('hosts', selectedHosts);
+      }
+      window.open(sessionPerfettoUrl.toString());
+    },
+
+    _createPerfettoButton: function() {
+      if (!this._isOss) {
+        const button = tr.ui.b.createButton('Perfetto', this._perfettoButtonOnclickCallback.bind(this));
+        button.setAttribute('id', 'perfetto');
+        const hostSelector = document.getElementById("host_selector");
+        Polymer.dom(this._traceViewer.leftControls).insertBefore(button, hostSelector);
+      }
+    },
+
+    _loadHosts: async function() {
+      if (!this.hostsDataUrl) {
+        return;
+      }
+      const response = await fetch(this.hostsDataUrl);
+      if (response.ok) {
+        this._hosts = await response.json();
+      } else {
+        this._displayOverlay(response.status, 'Failed to fetch hosts data');
+      }
+    },
+
+    // Overwrite and fine tune the inherited catapult/tracing UI
+    _adjustUI: function() {
+      // Make search hit number always visible
+      const searchInput = document.getElementById('filter');
+      searchInput.setAttribute('style', 'padding-right:64px;width:250px;')
+      const hitCount = document.getElementById('hitCount');
+      hitCount.setAttribute('style', 'width:245px;')
+
+      // Move help button to the front of the toolbar
+      const helpButton = document.getElementById('view_help_button');
+      helpButton.setAttribute('style', 'padding-left:5px;padding-right:5px;');
+      if (helpButton.children && helpButton.children.length && helpButton.children[0].textContent) {
+        helpButton.children[0].textContent = 'Key Shortcuts';
+      }
+      const perfettoSelector = document.getElementById("perfetto");
+      Polymer.dom(this._traceViewer.leftControls).insertBefore(helpButton, perfettoSelector);
+    },
+
+    _init: async function() {
+      if (this._isStreaming) {
+        // TODO(yinzz) cleanup hosts and process filter code later when the new filtering rolls out
+        if (!this._showFilterForm) {
+          await this._loadHosts();
+          this._createHostFilter();
+          this._createProcessesFilter();
+        } else {
+          this._hideProcessList();
+        }
+        this._createDetailFilter();
+        this._createPerfettoButton();
+      }
+      this._loadTrace(null, /* replaceModel= */ true);
+    },
+
+    _loadTrace: async function(requestedRange, replaceModel) {
+      this._replaceModel = replaceModel;
+      const startTime = performance.now();
+      this._throbber.className = 'active';
+      this._isLoading = true;
+      if (!this._isStreaming) {
+        await this._loadNonStreamingTrace();
+      } else {
+        await this._loadStreamingTrace(requestedRange, replaceModel);
+      }
+      this._isLoading = false;
+      this._throbber.className = 'inactive';
+      const endTime = performance.now();
+      const duration = endTime - startTime;
+      if(this._isInitialLoad) {
+        // measure the timing since browser start loading
+        window.parent.gtag && window.parent.gtag('event', 'timing_complete', {
+          'name': 'load',
+          'value': performance.now(),
+          'event_category': 'JS Dependency',
+          'event_label': `trace_viewer_${this._isStreaming ? 'streaming' : 'nonstreaming'}`,
+        });
+        this._isInitialLoad = false;
+        this._throbber.id = 'throbber';
+      } else {
+         // measure time consuming for page reloading when streaming
+         window.parent.gtag && window.parent.gtag('event', 'timing_complete', {
+          'name': 'load',
+          'value': duration,
+          'event_category': 'data',
+          'event_label': 'trace_viewer_reloading',
+        });
+      }
+      if (!this._isOss) {
+        this._insertRenderCompleteSignal();
+      }
+    },
+
+    _loadNonStreamingTrace: async function() {
+      // Send HTTP request to get the trace data.
+      var req = new XMLHttpRequest();
+      req.open('GET', this.traceDataUrl, true);
+
+      // Promisify and await this to make the loading trace synchronized
+      await new Promise(resolve => {
+        req.onreadystatechange = (event) => {
+          if (req.readyState !== 4) {
+            return;
+          }
+          window.setTimeout(() => {
+            if (req.status === 200) {
+              this.set('_traceData', req.responseText);
+            } else {
+              this._displayOverlay(req.status, 'Failed to fetch data');
+            }
+            resolve();
+          }, 0);
+        };
+        req.send(null);
+      });
+    },
+
+    _reloadingDisabled() {
+      return (this._resolution === 0) || !this._filteredByVisibility;
+    },
+
+    // Something has changed, so consider reloading the data:
+    //   - if we have zoomed in enough to need more detail
+    //   - if we have scrolled too close to missing data regions
+    // We ensure there's only ever one request in flight.
+    _maybeLoad: function() {
+      if (this._isLoading || this._reloadingDisabled()) return;
+      // We have several ranges of interest:
+      //             [viewport]           - what's on-screen
+      //         [----preserve----]       - issue loads to keep this full of data
+      //     [---------fetch----------]   - fetch this much data with each load
+      // [-----------full bounds--------] - the whole profile
+      var viewport = this._trackViewRange(this._traceViewer.trackView);
+      var PRESERVE_RATIO = tf_component_traceviewer.PRESERVE_RATIO;
+      var preserve = tf_component_traceviewer.intersect(
+        tf_component_traceviewer.expand(viewport, PRESERVE_RATIO),
+        this._fullBounds
+      );
+      var FETCH_RATIO = tf_component_traceviewer.FETCH_RATIO;
+      var fetch = tf_component_traceviewer.expand(viewport, FETCH_RATIO);
+      var zoomFactor =
+        tf_component_traceviewer.length(this._loadedRange) /
+        tf_component_traceviewer.length(fetch);
+      if (
+        !tf_component_traceviewer.within(preserve, this._loadedRange) ||
+        zoomFactor > tf_component_traceviewer.ZOOM_RATIO
+      ) {
+        this._loadTrace(fetch, /*replaceModel=*/ false);
+      }
+    },
+
+    _loadStreamingTrace: async function(requestedRange, replaceModel) {
+      var success = true;
+      let startUpdateModel;
+      let startUpdateView;
+
+      await this._loadJSON(requestedRange)
+        .then((data) => {
+          if (!this._isOss) {
+            this._addInitialResponseDataLatency(performance.now());
+            this._addDataResponseSize(data.length);
+          }
+          startUpdateModel = performance.now();
+          this._updateModel(data, replaceModel);
+          if (!this._isOss) {
+            this._addUpdateModelLatency(performance.now() - startUpdateModel);
+          }
+        })
+        .then(async () => {
+          // Wait for the Promise in requestAnimationFrame callback
+          // to be resolved so we can make the load trace flow synchronized
+          startUpdateView = performance.now();
+          await this._updateView(requestedRange);
+          if (!this._isOss) {
+            this._addUpdateViewLatency(performance.now() - startUpdateView);
+          }
+        })
+        .catch((err) => {
+          this._displayOverlay('Trace Viewer', err);
+        })
+    },
+
+    // Loads a time window (the whole trace if requestedRange is null).
+    // Returns a promise for the JSON event data.
+    _loadJSON: function(requestedRange) {
+      // Set up an XMLHTTPRequest to the JSON endpoint, populating range and
+      // resolution if appropriate.
+      var requestURL = this._buildBaseURL();
+      var ZOOM_RATIO = tf_component_traceviewer.ZOOM_RATIO;
+      if (requestURL.searchParams.has('selected_group_ids')) {
+        requestURL.searchParams.set('resolution', 0);
+      } else if (!requestURL.searchParams.has('resolution')) {
+        requestURL.searchParams.set('resolution', this._resolution * ZOOM_RATIO);
+      }
+      if (requestedRange != null) {
+        requestURL.searchParams.set('start_time_ms', requestedRange.min);
+        requestURL.searchParams.set('end_time_ms', requestedRange.max);
+      }
+
+      return new Promise(function(resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', requestURL);
+        xhr.onload = function() {
+          var contentType = this.getResponseHeader('Content-Type');
+          if (
+            this.status !== 200 ||
+            !contentType.startsWith('application/json')
+          ) {
+            var msg = requestURL + ' could not be loaded';
+            if (contentType.startsWith('text/plain')) {
+              msg = msg + ': ' + xhr.statusText;
+            }
+            reject(msg);
+          }
+          resolve(xhr.response);
+        };
+        xhr.onerror = function() {
+          reject(requestURL + 'could not be loaded: ' + xhr.statusText);
+        };
+        xhr.send();
+      });
+    },
+
+    _getEventHashKey: function(event) {
+      /* uniqueness of an event between tr.model refresh/reset are determinted by
+      1. uniqueness of host_id, backend encode host id as part of "pid".
+      2. uniqueness of event id within a host. event timestamp provide the main differerentiator,
+         however itself can not guarantee the uniqueness, backend will add an optional field "z"
+         to tie-break the situation.
+      3. Note: metadata events (describing process/threads) don't have a timestamp field. They are
+         hashed to a single key value, this is okay, because we don't need to refresh them after
+         initial load.
+      */
+      let key = event["pid"].toString();
+      key += "$";
+      key += event["ts"] || 0;
+      if ("z" in event) key += "$" + event["z"];
+      return key;
+    },
+
+    // Decodes the JSON trace events, removes all events that were loaded before
+    // and serializes to JSON again.
+    _filterKnownTraceEvents: function(traceEvents) {
+      if (this._loadedTraceEvents.size == 0) {
+        traceEvents.forEach(event => this._loadedTraceEvents.add(this._getEventHashKey(event)));
+        return traceEvents;
+      } else {
+        let filteredTraceEvents = [];
+        traceEvents.forEach(function (event) {
+          const key = this._getEventHashKey(event);
+          if (!this._loadedTraceEvents.has(key)) {
+            this._loadedTraceEvents.add(key);
+            filteredTraceEvents.push(event);
+          }
+        }, this);
+        return filteredTraceEvents;
+      }
+    },
+
+    // Updates the model with data returned by the JSON endpoint.
+    // If replaceModel is true, the data set is completely replaced; otherwise,
+    // the new data is merged with the old data.
+    // Returns a void promise.
+    _updateModel: function(data, replaceModel) {
+      data = JSON.parse(data);
+      if (!this._model /* first load */ || replaceModel) {
+        // Only give no events alert for first load or replace load
+        if (!data['returnedEventsSize']) {
+          this._displayOverlay('Trace Viewer', 'No trace events data returned.');
+        }
+        this._dirty = true;
+        this._model = new tr.Model();
+        this._loadedTraceEvents = new Set();
+        this._filteredByVisibility = data['filteredByVisibility'];
+        const fullTimespan = data['fullTimespan'];
+        this._fullBounds = {min: fullTimespan[0], max: fullTimespan[1]};
+        this._tasks = data['tasks'];
+      } else {
+        // Delete fields to prevent traceviewer from accumulating them.
+        delete data['metadata'];
+        delete data['displayTimeUnit'];
+        delete data['tasks'];
+        delete data['filteredByVisibility'];
+        delete data['returnedEventsSize'];
+        delete data['stackFrames'];
+      }
+
+      // Populate and show "details" selector.
+      if (data['details']) {
+        const detailsSelector = document.getElementById('details_selector');
+        detailsSelector.label = "Details";
+        const detailsDialog = detailsSelector.getElementsByTagName('dialog')[0];
+        data['details'].forEach(detail => {
+          let checkbox = detailsDialog.querySelector('#' + detail.name);
+          if (checkbox) {
+            checkbox.checked = detail.value;
+            return;
+          }
+          const checkboxDiv = document.createElement('div');
+          checkbox = document.createElement('input');
+          checkbox.setAttribute('type', 'checkbox');
+          checkbox.setAttribute('id', detail.name);
+          checkbox.setAttribute('name', detail.name);
+          checkbox.checked = detail.value;
+          checkbox.addEventListener('change', () => {
+            this._loadTrace(null, /* replaceModel= */ true);  // reload data.
+          });
+          checkboxDiv.appendChild(checkbox);
+          const checkboxLabel = document.createElement('label');
+          checkboxLabel.setAttribute('for', detail.name);
+          checkboxLabel.style.textTransform = 'capitalize';
+          checkboxLabel.innerText = detail.name.replace(/_/g, ' ');
+          checkboxDiv.appendChild(checkboxLabel);
+          detailsDialog.appendChild(checkboxDiv);
+        });
+        detailsSelector.style.display = 'flex';
+        delete data['details'];
+      }
+
+      if (data['selected_device_ids']) {
+        this._selectedDeviceIds = data['selected_device_ids'];
+        delete data['selected_device_ids'];
+      } else {
+        this._selectedDeviceIds = null;
+      }
+
+      data.traceEvents = this._filterKnownTraceEvents(data.traceEvents);
+      if (data.traceEvents.length > 0) {
+        var opt = new tr.importer.ImportOptions();
+        opt.shiftWorldToZero = false;
+        new tr.importer.Import(this._model, opt).importTraces([data]);
+        this._dirty = true;
+      }
+
+      this._devices = {};
+      for (const pid in this._model.processes) {
+        this._devices[pid] = this._model.processes[pid].name;
+      }
+
+      return Promise.resolve();
+    },
+
+    // Remove all checkboxes in the Process Filter Dropdown.
+    _clearProcessList: function() {
+      const dropdown = Polymer.dom(document.getElementById("process_filter_dropdown"));
+      while (dropdown.firstChild) {
+        dropdown.removeChild(dropdown.firstChild);
+      }
+    },
+
+    // Only for XProf Streaming Mode we need to define our own _updateProcessList()
+    // instead of using the Catapult timeline_view.html _updateProcessList() to
+    // create the Process Filter Dropdown.
+    // Ref: http://cs/github/catapult-project/catapult/tracing/tracing/ui/timeline_view.html?l=433
+    //
+    // If this._selectedDeviceIds is set from the data["selected_device_ids"] from the Trace JSON
+    // we only check pids that are in "selected_device_ids". This means Process Filter Dropdown
+    // should be consistent even as the user zooms/pans and new Trace JSON is loaded.
+    _updateProcessList: function() {
+      let selectedDeviceIds;
+      if (this._selectedDeviceIds !== null) {
+        selectedDeviceIds = this._selectedDeviceIds.map((id) => id.toString());
+      } else {
+        selectedDeviceIds = Object.keys(this._devices);
+      }
+
+      this._clearProcessList();
+
+      const cboxes = [];
+      const updateAll = (checked) => {
+        for (const cbox of cboxes) {
+          cbox.checked = checked;
+        }
+      };
+
+      const dropdown = Polymer.dom(document.getElementById("process_filter_dropdown"));
+      dropdown.appendChild(tr.ui.b.createButton('Check All', () => {
+        updateAll(true);
+      }));
+      dropdown.appendChild(tr.ui.b.createButton('Check None', () => {
+        updateAll(false);
+      }));
+      const loadButton = dropdown.appendChild(tr.ui.b.createButton('Load', () => {
+        this._loadTrace(null, /* replaceModel= */ true);  // reload data.
+      }));
+      loadButton.setAttribute('style', loadButton.getAttribute('style') + ';cursor:pointer;');
+
+      for (const pid in this._devices) {
+        const cbox = tr.ui.b.createCheckBox(undefined, undefined, undefined,
+            true, `${this._devices[pid]} (pid ${pid})`);
+
+        cbox.checked = selectedDeviceIds.includes(pid);
+
+        cboxes.push(cbox);
+        dropdown.appendChild(cbox);
+      }
+    },
+
+    // Updates the view based on the current model.
+    _updateView: async function(requestedRange) {
+      if (requestedRange == null) {
+        this._loadedRange = tf_component_traceviewer.expand(
+          this._fullBounds,
+          tf_component_traceviewer.FETCH_RATIO
+        );
+      } else {
+        this._loadedRange = requestedRange;
+      }
+      if (!this._dirty) {
+        return;
+      }
+      this._dirty = false;
+      // We can't assign the model until the viewer is attached. This may be
+      // delayed indefinitely if the tab is backgrounded. This version of polymer
+      // doesn't provide a direct way to observe the viewer being attached.
+      // This is a workaround: the browser won't paint until the viewer is attached.
+      // Promisify this to make the trace loading process synchronized
+      await new Promise(resolve => window.requestAnimationFrame(
+        function() {
+          this._traceViewer.model = this._model;
+          if (this._traceViewer.trackView != null) {
+            // Only initialized if data in nonempty!
+            // Wait 500ms to let an animated zoom/pan operation complete. Ideally,
+            // we could just explicitly wait for its end.
+            const debounce = (func, wait = 500) => {
+              let timer;
+
+              return (...args) => {
+                clearTimeout(timer);
+                timer = setTimeout(() => {
+                  func(...args);
+                }, wait);
+              };
+            }
+            const debouncedReload = debounce(this._maybeLoad.bind(this))
+            this._traceViewer.trackView.viewport.addEventListener(
+              'change',
+              debouncedReload
+            );
+          }
+          this._traceViewer.viewTitle = '';
+          resolve();
+        }.bind(this)
+      ));
+    },
+
+    // Dummy node inserted to enable webdriver detect render complete signal
+    // in the selenium test (trace viewer web perf test)
+    _insertRenderCompleteSignal: function() {
+      const node = parent.document.getElementById('page-start-to-render-completed-latency');
+      node.value = performance.now();
+      const div = parent.document.createElement('div');
+      div.setAttribute('id', 'render-completed');
+      div.setAttribute('style', 'display: none;');
+      const tv = parent.document.getElementsByTagName('trace-viewer')[0];
+      tv.appendChild(div);
+    },
+
+    _addDataResponseSize: function(size) {
+      const node = parent.document.getElementById('initial-data-response-size');
+      node.value = size;
+    },
+
+    _addInitialResponseDataLatency: function(latency) {
+      const node = parent.document.getElementById('page-start-to-data-load-latency');
+      node.value = latency;
+    },
+
+    _addUpdateModelLatency: function(latency) {
+      const node = parent.document.getElementById('update-model-latency');
+      node.value = latency;
+    },
+
+    _addUpdateViewLatency: function(latency) {
+      const node = parent.document.getElementById('update-view-latency');
+      node.value = latency;
+    },
+
+    // Access the {min, max} range of a trackView.
+    _trackViewRange: function(trackView) {
+      var xfm = trackView.viewport.currentDisplayTransform;
+      const pixelRatio = window.devicePixelRatio || 1;
+      const devicePixelWidth = pixelRatio * trackView.viewWidth_;
+      return {
+        min: xfm.xViewToWorld(0),
+        max: xfm.xViewToWorld(devicePixelWidth),
+      };
+    },
+
+    // Returns the resolution (in number of events) given the width of the
+    // trace viewer (in pixels).
+    _resolutionFromViewerWidth(viewerWidth) {
+      const pixelRatio = window.devicePixelRatio || 1;
+      const minEventWidth = 2 * pixelRatio;
+      viewerWidth -= tr.ui.b.constants.HEADING_WIDTH;  // substract row header
+      viewerWidth *= pixelRatio;  // adjust pixel ratio
+      return Math.round(viewerWidth / minEventWidth);
+    },
+
+    _updateHostsParamToBaseUrl: function(requestURL) {
+      const selectedHosts = this._getSelectedHosts();
+      if (selectedHosts.length) {
+        requestURL.searchParams.set('hosts', selectedHosts.join(','));
+      } else {
+        requestURL.searchParams.set('hosts', 'None');
+      }
+    },
+
+    _updateProcessesSelectionToBaseUrl: function(requestURL) {
+      // Populate query parameter "selected_device_ids".
+      const dropdown = Polymer.dom(document.getElementById("process_filter_dropdown"));
+      const selectedDeviceIds = [];
+      // Checkbox nodes start at index 3 since the first 3 nodes are the "All", "None" and "Load" button.
+      for (let i = 3; i < dropdown.childNodes.length; ++i) {
+        const checkbox = dropdown.childNodes[i].getElementsByTagName('input')[0];
+        if (checkbox.checked) {
+          const label = dropdown.childNodes[i].getElementsByTagName('label')[0];
+          const pid = label.innerText.match(/pid (\d+)/)[1];
+          selectedDeviceIds.push(pid)
+        }
+      }
+
+      // Only send "selected_device_ids" query param when Process Filter Dropdown is populated
+      // with a list of devices (pids) checkboxes.
+      if (dropdown.childNodes.length > 2) {
+        requestURL.searchParams.set('selected_device_ids', selectedDeviceIds.join(','));
+      }
+    },
+
+    // Builds a base URL for fetching json data. The URL will be assembled with
+    // all filtering URL parameters, except resolution and range.
+    _buildBaseURL: function() {
+      const requestURL = new URL(this.traceDataUrl, window.location.href);
+      this._updateHostsParamToBaseUrl(requestURL);
+      const detailsSelector = document.getElementById("details_selector");
+      const detailsDialog = detailsSelector.getElementsByTagName('dialog')[0];
+      const checkboxDivs = detailsDialog.getElementsByTagName('div');
+      for (let i = 0; i < checkboxDivs.length; ++i) {
+        const checkbox = checkboxDivs[i].getElementsByTagName('input')[0];
+        requestURL.searchParams.set(checkbox.name, checkbox.checked);
+      }
+
+      if (!this._showFilterForm) {
+        this._updateProcessesSelectionToBaseUrl(requestURL);
+      }
+
+      if (requestURL.searchParams.has('use_saved_result')) {
+        if (this._dataRegenerated) {
+          requestURL.searchParams.delete('use_saved_result');
+        } else {
+          this._dataRegenerated = true;
+        }
+      }
+
+      requestURL.searchParams.set('replace_model', this._replaceModel);
+      return requestURL;
+    },
+
+    _traceDataChanged: function(data) {
+      if (!data) {
+        this._displayOverlay('Trace Viewer', 'No trace to display...');
+        return;
+      }
+      // Feed the trace data into the trace viewer app.
+      this._traceModel = new tr.Model();
+      var i = new tr.importer.Import(this._traceModel);
+      var p = i.importTracesWithProgressDialog([data]);
+      p.then(() => {
+        this._traceViewer.model = this._traceModel;
+        this._traceViewer.viewTitle = 'Trace View';
+      }).catch((err) => {
+        this._displayOverlay(
+          'Import error',
+          tr.b.normalizeException(err).message
+        );
+      });
+    },
+
+    _displayOverlay: function(title, content) {
+      var overlay = new tr.ui.b.Overlay();
+      overlay.textContent = content;
+      overlay.title = title;
+      overlay.visible = true;
+    },
+  });
+</script>

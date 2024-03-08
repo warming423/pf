@@ -1,0 +1,90 @@
+<div class="form-container">
+  <form (ngSubmit)="onSubmit()">
+    <div class="row" *ngIf="!isHloOssTool" id="xla-module-list-header">
+      <div [ngClass]="{ 'mat-subheading-2': true }">
+        XLA Modules ({{ moduleList.length }})
+      </div>
+    </div>
+    <mat-form-field class="full-width" *ngIf="!isHloOssTool" id="xla-module-list-selector" appearance="outline">
+      <mat-select
+        name="selectedModule"
+        panelClass="panel-override"
+        [ngModel]="params.selectedModule"
+        [disabled]="useProgramId"
+        (ngModelChange)="onUpdateParam({ selectedModule: $event })"
+      >
+        <mat-option *ngFor="let module of getModuleList()" [value]="module">
+          {{ module }}
+        </mat-option>
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field class="full-width" *ngIf="useProgramId">
+      <mat-label>XLA Program Id</mat-label>
+      <input
+        matInput
+        aria-label="program-id"
+        autocomplete="off"
+        name="programId"
+        [disabled]="true"
+        [value]="params.programId"
+      />
+    </mat-form-field>
+    <mat-form-field class="full-width">
+      <mat-label>Op Name</mat-label>
+      <input
+        matInput
+        matTooltip="Op name for the center node."
+        aria-label="op-name"
+        required
+        autocomplete="off"
+        [ngModel]="params.opName"
+        (ngModelChange)="onUpdateParam({ opName: $event.trim() })"
+        name="opName"
+      />
+    </mat-form-field>
+    <mat-form-field class="full-width">
+      <mat-label>Graph Width</mat-label>
+      <input
+        matInput
+        matTooltip="Graph width from the center node. Suggest < 10."
+        aria-label="graph-width"
+        type="number"
+        min="1"
+        step="1"
+        [ngModel]="params.graphWidth"
+        (ngModelChange)="onUpdateParam({ graphWidth: $event })"
+        name="graphWidth"
+      />
+    </mat-form-field>
+
+    <mat-checkbox
+      [ngModel]="params.showMetadata"
+      name="showMetadata"
+      (ngModelChange)="onUpdateParam({ showMetadata: $event })"
+      class="full-width"
+      >Show Metadata</mat-checkbox
+    >
+    <mat-checkbox
+      [ngModel]="params.mergeFusion"
+      name="mergeFusion"
+      matTooltip="Hide the fusion subcomputations in the rendered graph"
+      (ngModelChange)="onUpdateParam({ mergeFusion: $event })"
+      class="full-width"
+    >
+      Merge Fusion
+    </mat-checkbox>
+    <div class="actions">
+      <button
+        mat-flat-button
+        extended
+        name="submit"
+        type="submit"
+        color="primary"
+        class="search-button"
+        [disabled]="!validToSubmit()"
+      >
+        <mat-icon>search</mat-icon> Search Graph
+      </button>
+    </div>
+  </form>
+</div>
