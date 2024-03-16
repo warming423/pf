@@ -34,7 +34,7 @@ _BANDWIDTH_CONVERSION_FACTOR = (
     _BYTES_TO_GIGABITS_CONVERSION_FACTOR / _MICRO_TO_SECONDS_CONVERSION_FACTOR
 )
 
-
+##将比特数据转化成可读形式（100 kb)
 def convert_bytes_to_human_readable_format(value):
   """Convert number of bytes to a human readable format (e.g. 10 KB).
 
