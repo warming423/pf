@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 """For conversion of Dcn Collective Stats page protos to GViz DataTables.
-
+将收集到的性能数据转成gviz列表形式,方便后续调用google chart库可视化
 Usage:
     gviz_data_tables = generate_all_chart_tables(dcn_slack_analysis)
 """

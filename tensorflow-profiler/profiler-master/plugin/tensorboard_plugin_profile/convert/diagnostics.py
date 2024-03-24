@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 """For conversion of diagnostics protos to GViz DataTables.
-
+报错信息,返回报错信息列表
 Usage:
     gviz_data_tables = generate_diagnostics_tables(diag)
 """
