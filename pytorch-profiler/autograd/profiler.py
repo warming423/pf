@@ -885,15 +885,6 @@ class EnforceUnique:
 
 
 def parse_nvprof_trace(path):
-    '''
-    这段代码是用来解析 NVProf NVIDIA Profiler 的跟踪数据的。NVProf 是 NVIDIA 提供的一个性能分析工具，用于分析 CUDA 应用程序的性能瓶颈。
-    这个函数 parse_nvprof_trace 接受一个参数 path,代表 NVProf 跟踪文件的路径。
-    然后它通过 SQLite3 库来连接这个数据库文件，假设这个文件是一个 SQLite 数据库文件，从中提取有关于 CUDA 应用程序执行的信息。
-    这个函数首先解析了字符串表，获取了字符串的映射关系，用于后面的解析过程中，将字符串 ID 转换为相应的字符串值。
-    然后，它执行了两个 SQL 查询，分别从 CUPTI 活动中获取了标记事件Markers和核函数事件Kernel Events的信息。
-    这些事件的时间戳、名称等信息都被提取出来,然后用于创建相应的 FunctionEvent 对象。FunctionEvent 对象通常用于记录函数调用或者核函数的执行信息。
-    在核函数事件的解析过程中，它会根据相应的标记事件来关联每个核函数执行与对应的函数事件。最后，它对这些事件进行了排序，并将它们返回作为结果。
-    '''
     import sqlite3
 
     conn = sqlite3.connect(path)
