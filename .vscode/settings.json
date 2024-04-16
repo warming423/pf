@@ -1,0 +1,5 @@
+{
+    "python.analysis.stubPath": "/home/wangm/pf/VisualOP/op/_C",
+    "cmake.sourceDirectory": "/home/wangm/pf/pytorch-main/pytorch-main",
+    "cmake.configureOnOpen": true
+}

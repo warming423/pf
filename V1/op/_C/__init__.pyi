@@ -30,15 +30,14 @@ from typing import (
     runtime_checkable,
 )
 from typing_extensions import ParamSpec
-
+####from torch import SymInt
 import torch
-from torch import inf, SymInt, Tensor
-from torch.autograd.graph import Node as _Node
+from torch import inf, Tensor
+#from torch.autograd.graph import Node as _Node
 from torch.package import PackageExporter
 from torch.storage import UntypedStorage, TypedStorage
 from torch.types import (
     _bool,
-    _complex,
     _device,
     _dispatchkey,
     _dtype,
@@ -155,7 +154,7 @@ class finfo:
     @overload
     def __init__(self) -> None: ...
 
-${dtype_class_hints}
+#${dtype_class_hints}
 
 # Defined in torch/csrc/Layout.cpp
 class layout: ...
@@ -1201,8 +1200,8 @@ class BatchNormBackend(Enum): ...
 
 class ConvBackend(Enum): ...
 
-class Tag(Enum):
-    ${tag_attributes}
+# class Tag(Enum):
+#     ${tag_attributes}
 
 # Defined in `valgrind.h` and `callgrind.h` respectively.
 def _valgrind_supported_platform() -> _bool: ...  # NVALGRIND
@@ -1472,8 +1471,8 @@ def _dispatch_is_alias_key(dispatch: _dispatchkey) -> _bool: ...
 def _functionality_to_backend_keys(dispatch: _dispatchkey) -> List[DispatchKey]: ...
 def _functionalization_reapply_views_tls() -> _bool: ...
 
-class DispatchKey(Enum):
-    ${dispatch_key_hints}
+# class DispatchKey(Enum):
+#     ${dispatch_key_hints}
 
 class DispatchKeySet:
     def __init__(self, key: DispatchKey) -> None: ...
@@ -1536,12 +1535,12 @@ def _are_functorch_transforms_active() -> _bool: ...
 # Define in torch/csrc/autograd/init.cpp
 def _set_python_dispatcher(dispatcher: object) -> None: ...
 
-def _get_nested_int(id: _int, coeff: _int) -> SymInt: ...
+#def _get_nested_int(id: _int, coeff: _int) -> SymInt: ...
 
 def _get_constant_bool_symnode(val: _bool) -> Any: ...
 
-class _TorchDispatchModeKey(Enum):
-    ${torch_dispatch_mode_key_hints}
+# class _TorchDispatchModeKey(Enum):
+#     ${torch_dispatch_mode_key_hints}
 
 class _SetExcludeDispatchKeyGuard:
     def __init__(self, k: DispatchKey, enabled: _bool): ...
@@ -1566,11 +1565,11 @@ class ThroughputBenchmark:
     def run_once(self, *args: Any, **kwargs: Any) -> Any: ...
     def benchmark(self, config: BenchmarkConfig) -> BenchmarkExecutionStats: ...
 
-# Defined in torch/csrc/Storage.cpp
-${legacy_storage_base_hints}
+# # Defined in torch/csrc/Storage.cpp
+# ${legacy_storage_base_hints}
 
-# TODO: where
-${legacy_class_hints}
+# # TODO: where
+# ${legacy_class_hints}
 
 # Defined in torch/csrc/autograd/python_engine.cpp
 class _ImperativeEngine:
@@ -1610,7 +1609,7 @@ class TensorBase(metaclass=_TensorMeta):
     nbytes: _int
     itemsize: _int
     _has_symbolic_sizes_strides: _bool
-    ${tensor_method_hints}
+   # ${tensor_method_hints}
 
 _TensorBase = TensorBase
 

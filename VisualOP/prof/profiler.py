@@ -1,27 +1,25 @@
 import gzip
 import json
-import os
+import os,sys
 import tempfile
 from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from warnings import warn
-
 from typing_extensions import Self
-
 import torch
-import torch.autograd.profiler as prof
-#from _C import _get_privateuse1_backend_name
-from _C import (
+import autograd.profiler as prof
+from Stubs._profiler import _get_privateuse1_backend_name
+from Stubs._profiler import (
     _add_execution_trace_observer,
     _disable_execution_trace_observer,
     _enable_execution_trace_observer,
     _ExperimentalConfig,
     _remove_execution_trace_observer,
 )
-from torch.autograd import kineto_available, ProfilerActivity
-from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
+from ..autograd import kineto_available, ProfilerActivity
+from _memory_profiler import MemoryProfile, MemoryProfileTimeline
 
 
 __all__ = [
@@ -311,18 +309,18 @@ class _KinetoProfile:
         ``path``'s suffix.
 
         - For an HTML compatible plot, use the suffix ``.html``, and a memory timeline
-          plot will be embedded as a PNG file in the HTML file.
+        plot will be embedded as a PNG file in the HTML file.
 
         - For plot points consisting of ``[times, [sizes by category]]``, where
-          ``times`` are timestamps and ``sizes`` are memory usage for each category.
-          The memory timeline plot will be saved a JSON (``.json``) or gzipped JSON
-          (``.json.gz``) depending on the suffix.
+        ``times`` are timestamps and ``sizes`` are memory usage for each category.
+        The memory timeline plot will be saved a JSON (``.json``) or gzipped JSON
+        (``.json.gz``) depending on the suffix.
 
         - For raw memory points, use the suffix ``.raw.json.gz``. Each raw memory
-          event will consist of ``(timestamp, action, numbytes, category)``, where
-          ``action`` is one of ``[PREEXISTING, CREATE, INCREMENT_VERSION, DESTROY]``,
-          and ``category`` is one of the enums from
-          ``torch.profiler._memory_profiler.Category``.
+        event will consist of ``(timestamp, action, numbytes, category)``, where
+        ``action`` is one of ``[PREEXISTING, CREATE, INCREMENT_VERSION, DESTROY]``,
+        and ``category`` is one of the enums from
+        ``torch.profiler._memory_profiler.Category``.
 
         Output: Memory timeline written as gzipped JSON, JSON, or HTML.
         """
