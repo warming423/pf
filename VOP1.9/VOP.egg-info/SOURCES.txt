@@ -1,0 +1,13 @@
+README.md
+setup.py
+VOP.egg-info/PKG-INFO
+VOP.egg-info/SOURCES.txt
+VOP.egg-info/dependency_links.txt
+VOP.egg-info/requires.txt
+VOP.egg-info/top_level.txt
+agrad/__init__.py
+agrad/profiler.py
+prof/__init__.py
+prof/profiler.py
+stubs/__init__.py
+stubs/_autograd.py
