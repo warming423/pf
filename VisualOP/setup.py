@@ -18,7 +18,7 @@ def find_version(*file_paths):
     raise RuntimeError("Unable to find version string.")
 
 long_description = read("README.md")
-version = find_version("prof", "__init__.py")
+version = find_version("Prof", "__init__.py")
 
 setuptools.setup(
     name="VisualOP",
