@@ -78,7 +78,7 @@ class ProfilerAction(Enum):
     RECORD_AND_SAVE = 3  
 
 
-def schedule(*, closed: int, ready: int, record: int, repeat: int = 0, skip_first: int = 0) -> Callable:
+def make_scheduler(*, closed: int, ready: int, record: int, repeat: int = 0, skip_first: int = 0) -> Callable:
     r"""
         (CLOSED)  (CLOSED)    (CLOSED)  (READY)    (RECORD,last SAVE)      (CLOSED)
         START -> skip_first -> closed -> ready    ->    record       ->      END
@@ -136,41 +136,6 @@ def _default_schedule(_: int) -> ProfilerAction:
     return ProfilerAction.RECORD
 
 
-def export_chrome_tracing(dir_name: str, worker_name: Optional[str] = None) -> Callable:
-    r"""
-    Return a callable, used for outputing tracing data to chrome tracing format file.
-
-    Args:
-        dir_name(str): Directory to save profiling data.
-        worker_name(str, optional): Prefix of the file name saved, default is `[hostname]_[pid]`.
-
-    Returns:
-        A callable, which takes a Profiler object as parameter and calls its export method to save data to chrome tracing format file.
-
-    Examples:
-        profiler.prof(on_trace_ready=profiler.export_chrome_tracing('./log'))
-
-    """
-    if not os.path.exists(dir_name):
-        try:
-            os.makedirs(dir_name, exist_ok=True)
-        except Exception:
-            raise RuntimeError(
-                f"Can not create directory '{dir_name}' for saving profiling results."
-            )
-
-    def handle_fn(prof):
-        nonlocal worker_name
-        if not worker_name:
-            worker_name = f"host_{socket.gethostname()}pid_{str(os.getpid())}"
-        now = datetime.datetime.now()
-        filename = '{}_time_{}.paddle_trace.json'.format(
-            worker_name, now.strftime('%Y_%m_%d_%H_%M_%S_%f')
-        )
-        prof.export(os.path.join(dir_name, filename), "json")
-
-    return handle_fn
-
 def export_files(dir_name:str, file_name: Optional[str]=None, file_type: Optional[str]='json'):
     
     if not os.path.exists(dir_name):
@@ -197,38 +162,6 @@ def export_files(dir_name:str, file_name: Optional[str]=None, file_type: Optiona
         prof.export(os.path.join(dir_name, file_name))
     return handler_fn
 
-def export_protobuf(dir_name: str, worker_name: Optional[str] = None) -> Callable:
-    r"""
-    Return a callable, used for outputing tracing data to protobuf file.
-
-    Args:
-        dir_name(str): Directory to save profiling data.
-        worker_name(str, optional): Prefix of the file name saved, default is `[hostname]_[pid]`.
-        
-    example:
-        profiler.prof(on_trace_ready = profiler.export_protobuf('./log'))
-            
-    """
-    if not os.path.exists(dir_name):
-        try:
-            os.makedirs(dir_name, exist_ok=True)
-        except Exception:
-            raise RuntimeError(
-                f"Can not create directory '{dir_name}' for saving profiling results."
-            )
-
-    def handle_fn(prof):
-        nonlocal worker_name
-        if not worker_name:
-            worker_name = f"host_{socket.gethostname()}pid_{str(os.getpid())}"
-        now = datetime.datetime.now()
-        filename = '{}_time_{}.paddle_trace.pb'.format(
-            worker_name, now.strftime('%Y_%m_%d_%H_%M_%S_%f')
-        )
-        prof.export(os.path.join(dir_name, filename), "pb")
-
-    return handle_fn
-
 
 def _get_supported_device() -> Iterable[ProfilerDevice]:
     r"""
@@ -253,8 +186,6 @@ def _get_supported_device() -> Iterable[ProfilerDevice]:
         ]
     return [ProfilerDevice.CPU, ProfilerDevice.CUSTOM_DEVICE]
 
-class profile(_Profiler):
-    pass
 
 class prof:
     r"""
@@ -314,8 +245,8 @@ class prof:
     def __init__(
         self,
         *,
-        targets: Optional[Iterable[ProfilerDevice]] = None,
-        scheduler: Union[Callable[[int], ProfilerAction], tuple, None] = None,
+        device: Optional[Iterable[ProfilerDevice]] = None,
+        schedule: Union[Callable[[int], ProfilerAction], tuple, None] = None,
         on_trace_ready: Optional[Callable[..., Any]] = None,
         record_shapes: Optional[bool] = False,
         profile_memory: Optional[bool] = False,
@@ -323,17 +254,17 @@ class prof:
         custom_device_types: Optional[list] = [],
         with_flops: Optional[bool] = False,
     ):
-        supported_targets = _get_supported_device()
-        if targets:
-            self.targets = set(targets)
-            for target in targets:
-                if target not in supported_targets:
+        supported_device = _get_supported_device()
+        if device:
+            self.targets = set(device)
+            for target in device:
+                if target not in supported_device:
                     self.targets.remove(target)
                     warn(
                         f"Profiling {target} is not supported now."
                     )
         else:
-            self.targets = supported_targets
+            self.targets = supported_device
             
         profileoption = ProfilerOptions()
         if ProfilerDevice.CPU in self.targets:
@@ -348,21 +279,22 @@ class prof:
                 custom_device_types = paddle.device.get_all_custom_device_type()
         wrap_optimizers()
         self.profiler = _Profiler.create(profileoption, custom_device_types)
-        if callable(scheduler):
-            self.scheduler = scheduler
-        elif isinstance(scheduler, (tuple, list)):
-            assert len(scheduler) == 2 and scheduler[1] > scheduler[0]
-            start_batch, end_batch = scheduler
+      
+        if callable(schedule):
+            self.scheduler = schedule
+        elif isinstance(schedule, (tuple, list)):
+            assert len(schedule) == 2 and schedule[1] > schedule[0]
+            start_batch, end_batch = schedule
             start_batch = max(start_batch, 0)
             if start_batch >= 1:
-                self.scheduler = schedule(
+                self.scheduler = make_scheduler(
                     closed=max(start_batch - 1, 0),
                     ready=1,
                     record=(end_batch - start_batch),
                     repeat=1,
                 )
             else:
-                self.scheduler = schedule(
+                self.scheduler = make_scheduler(
                     closed=0,
                     ready=0,
                     record=(end_batch - start_batch),
@@ -372,7 +304,7 @@ class prof:
             self.scheduler = _default_schedule
 
         if on_trace_ready is None:
-            self.on_trace_ready = export_chrome_tracing('./profiling_data/')
+            self.on_trace_ready = export_files('./profiling_data/')
         else:
             self.on_trace_ready = on_trace_ready
         self.step_num = 0
@@ -550,20 +482,7 @@ class prof:
                 self.profiler.start()
             if self.on_trace_ready:
                 self.on_trace_ready(self)
-
-    # def export(self, path="", format="json"):
-    #     r"""
-    #     Exports the tracing data to file.
-
-    #     Args:
-    #         path(str): file path of the output.
-    #         format(str, optional): output format, can be chosen from ['json', 'pb'], 'json' for chrome tracing and 'pb' for protobuf, default value is 'json'.
-    #     Examples:
-    #         prof.export(path="./profiler_data.json", format="json")
-    #     """
-    #     if self.profiler_result:
-    #         self.profiler_result.save(path, format)
-            
+     
     def export(self, path:str):
         """
         Exports the collected trace in Chrome JSON format.

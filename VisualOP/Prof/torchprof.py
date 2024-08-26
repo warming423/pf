@@ -6,7 +6,7 @@ import socket
 import time
 import tempfile
 from enum import Enum
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional,Union
 from warnings import warn
 
 import torch
@@ -32,7 +32,7 @@ class ProfilerAction(Enum):
     RECORD_AND_SAVE = 3
 
 
-def schedule(*,
+def make_scheduler(*,
              closed: int,
              ready: int,
              record: int,
@@ -246,28 +246,48 @@ class prof():
     def __init__(
             self,
             *,
-            activities: Optional[Iterable[ProfilerActivity]] = None,
-            schedule: Optional[Callable[[int], ProfilerAction]] = None,
+            device: Optional[Iterable[ProfilerActivity]] = None,
+            schedule: Union[Callable[[int], ProfilerAction], tuple, None] = None,
             on_trace_ready: Optional[Callable[..., Any]] = None,
             record_shapes: bool = False,
             profile_memory: bool = False,
             with_stack: bool = False,
             with_flops: bool = False,          
         ):
-        if activities:
-            self.activities = set(activities)
+        if device:
+            self.device = set(device)
         else:
-            self.activities = supported_activities()
+            self.device = supported_activities()
 
-        assert len(self.activities) > 0, "No valid profiler activities found"
+        assert len(self.device) > 0, "No valid profiler activities found"
 
-        if schedule:
+        if callable(schedule):
             self.schedule = schedule
             # add step markers into the trace and table view
             self.record_steps = True
+        elif isinstance(schedule,(tuple,list)):
+            assert len(schedule) == 2 and schedule[1] > schedule[0]
+            start_batch, end_batch = schedule
+            self.record_steps = True
+            start_batch = max(start_batch,0)
+            if start_batch >= 1:
+                self.schedule=make_scheduler(
+                    closed=max(start_batch-1,0),
+                    ready=1,
+                    record=(end_batch-start_batch),
+                    repeat=1,
+                )
+            else:
+                self.schedule = make_scheduler(
+                    closed=0,
+                    ready=0,
+                    record=(end_batch-start_batch),
+                    repeat=1,
+                )
         else:
             self.schedule = _default_schedule
             self.record_steps = False
+            
         self.on_trace_ready = on_trace_ready
         self.record_shapes = record_shapes
         self.with_flops = with_flops
@@ -354,7 +374,7 @@ class prof():
 
     def export(self, path: str):
         """
-        Exports the collected trace in Chrome JSON format.
+        Exports the collected data into files(eg.json, excel)
         """
         assert self.profiler
         if path.endswith('.gz'):
@@ -472,8 +492,8 @@ class prof():
 
     def _start_warmup(self):
         self.profiler = profile(
-            use_cuda=(ProfilerActivity.CUDA in self.activities),
-            use_cpu=(ProfilerActivity.CPU in self.activities),
+            use_cuda=(ProfilerActivity.CUDA in self.device),
+            use_cpu=(ProfilerActivity.CPU in self.device),
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,

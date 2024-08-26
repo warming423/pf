@@ -1,20 +1,25 @@
 import paddle
 import Prof.paddleprof as profiler
 
-paddle.device.set_device("cpu")
+# print(paddle.device.get_device())
+
 model=paddle.vision.alexnet(pretrained=False)
 x=paddle.rand([1, 3, 224, 224])
 with profiler.prof(
-    targets=[
-        profiler.ProfilerDevice.CPU
+    device=[
+      profiler.ProfilerDevice.CPU,
+      #profiler.ProfilerDevice.GPU
+        
     ],
-    scheduler=(0,2),
-    on_trace_ready=profiler.export_files("./data",file_type="excel"),
+    schedule=(0,2),
+    on_trace_ready=profiler.export_files("./data",file_type="json"),
+    record_shapes=True,
+    with_flops=True,
+    profile_memory=False,
     timer_only=False,
 ) as p:
-    for iter in range(10):
         model(x)
     
-print(p.summary())        
+#print(p.summary())        
         
 

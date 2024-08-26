@@ -1,5 +1,5 @@
 import paddle
-import paddle.profiler as profiler
+import Prof.paddleprof as profiler 
 import paddle.nn.functional as F
 from paddle.vision.transforms import ToTensor
 import numpy as np
@@ -66,13 +66,12 @@ def train(model):
 
     valid_loader = paddle.io.DataLoader(cifar10_test, batch_size=batch_size)
 
-    # 创建性能分析器相关的代码
-    def my_on_trace_ready(prof): # 定义回调函数，性能分析器结束采集数据时会被调用
-      callback = profiler.export_chrome_tracing('./data') # 创建导出性能数据到 profiler_demo 文件夹的回调函数
-      callback(prof)  # 执行该导出函数
-      prof.summary(sorted_by=profiler.SortedKeys.CPUTotal) # 打印表单，按 GPUTotal 排序表单项
-
-    p = profiler.Profiler(scheduler = [3,14], on_trace_ready=my_on_trace_ready, timer_only=False) # 初始化 Profiler 对象
+   
+    p = profiler.prof(device=[
+        profiler.ProfilerDevice.CPU,
+        profiler.ProfilerDevice.GPU
+        ],
+        schedule= [3,14], on_trace_ready=profiler.export_files('./data'), timer_only=False,record_shapes=True,profile_memory=True,with_flops=True) # 初始化 Profiler 对象
 
     p.start() # 性能分析器进入第 0 个 step
 

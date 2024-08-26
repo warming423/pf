@@ -29,7 +29,7 @@ if __name__ == '__main__':
     log_dir = "/home/wangm/MIA/DCGAN-MIA/log/G/mini_picture"
     workers = 2 
     batch_size = 32
-    num_epochs = 3
+    num_epochs = 2
     h=64
     w=64
     z_dim=100
@@ -160,71 +160,72 @@ if __name__ == '__main__':
     D_losses = []
     iters = 0
 
-    for epoch in range(num_epochs):
-        for i, data in enumerate(dataloader, 0): 
-        ##### (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
-            ## Train with all-real batch
-            
-            netD.zero_grad()
-            real_cpu = data[0].to(device)   
-            b_size = real_cpu.size(0)
-            label = torch.full((b_size,), real_label, dtype=torch.float, device=device)
-            output = netD(real_cpu).view(-1)   #128-dimension
-            errD_real = criterion(output, label) # Calculate loss on all-real batch
-            errD_real.backward()
-            D_x = output.mean().item()  #output所有128元素的均值f
-
-            ## Train with all-fake batch
-            noise = torch.randn(b_size,z_dim,device=device)
-            fake = netG(noise) 
-            label.fill_(fake_label)
-            output = netD(fake.detach()).view(-1)
-            errD_fake = criterion(output, label)
-            errD_fake.backward()
-            D_G_z1 = output.mean().item()
-            errD = errD_real + errD_fake
-            optimizerD.step()
-
-        ####### (2) Update G network: maximize log(D(G(z)))
-            netG.zero_grad()
-            label.fill_(real_label)  
-            output = netD(fake).view(-1)
-            errG = criterion(output, label)
-            errG.backward()
-            D_G_z2 = output.mean().item()
-            optimizerG.step()
-            
-            # Output training stats
-            if i % 50 == 0:
-                print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\tD(x): %.4f\tD(G(z)): %.4f / %.4f'
-                    % (epoch, num_epochs, i, len(dataloader),
-                        errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
-                
-            if (iters % 500 == 0) or ((epoch == num_epochs-1) and (i == len(dataloader)-1)):
-                with torch.no_grad():
-                    fake = netG(fixed_noise).detach().cpu()
-                    # img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
-                    fake_tensor=vutils.make_grid(fake,nrow=10,padding=2,normalize=True)
-                    save_image(fake_tensor,fp=f"{log_dir}/CelebA_{epoch}_{iters}.png")
-            iters += 1
-
-            # Save Losses for plotting later
-            G_losses.append(errG.item())
-            D_losses.append(errD.item())
-            
-        with profiler.prof(
-            activities=[
+              
+    with profiler.prof(
+            device = [
                 profiler.ProfilerActivity.CPU,
                 profiler.ProfilerActivity.CUDA,
             ],
-            on_trace_ready=profiler.tensorboard_trace_handler("./data")
+            schedule=(120,230),
+            on_trace_ready=profiler.export_files("./data",file_name="test2")
         ) as p:
-            netG.eval()
-            netD.eval()
-            netG(noise)
-            netD(real_cpu)
-            
-        print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+        for epoch in range(num_epochs):
+            for i, data in enumerate(dataloader, 0): 
+            ##### (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
+                ## Train with all-real batch
+                
+                netD.zero_grad()
+                real_cpu = data[0].to(device)   
+                b_size = real_cpu.size(0)
+                label = torch.full((b_size,), real_label, dtype=torch.float, device=device)
+                output = netD(real_cpu).view(-1)   #128-dimension
+                errD_real = criterion(output, label) # Calculate loss on all-real batch
+                errD_real.backward()
+                D_x = output.mean().item()  #output所有128元素的均值f
+
+                ## Train with all-fake batch
+                noise = torch.randn(b_size,z_dim,device=device)
+                fake = netG(noise) 
+                label.fill_(fake_label)
+                output = netD(fake.detach()).view(-1)
+                errD_fake = criterion(output, label)
+                errD_fake.backward()
+                D_G_z1 = output.mean().item()
+                errD = errD_real + errD_fake
+                optimizerD.step()
+
+            ####### (2) Update G network: maximize log(D(G(z)))
+                netG.zero_grad()
+                label.fill_(real_label)  
+                output = netD(fake).view(-1)
+                errG = criterion(output, label)
+                errG.backward()
+                D_G_z2 = output.mean().item()
+                optimizerG.step()
+                
+                # Output training stats
+                if i % 50 == 0:
+                    print('[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\tD(x): %.4f\tD(G(z)): %.4f / %.4f'
+                        % (epoch, num_epochs, i, len(dataloader),
+                            errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
+                    
+                if (iters % 500 == 0) or ((epoch == num_epochs-1) and (i == len(dataloader)-1)):
+                    with torch.no_grad():
+                        fake = netG(fixed_noise).detach().cpu()
+                        # img_list.append(vutils.make_grid(fake, padding=2, normalize=True))
+                        fake_tensor=vutils.make_grid(fake,nrow=10,padding=2,normalize=True)
+                        save_image(fake_tensor,fp=f"{log_dir}/CelebA_{epoch}_{iters}.png")
+                iters += 1
+                
+                p.step()
+
+                # Save Losses for plotting later
+                #G_losses.append(errG.item())
+                #D_losses.append(errD.item())
+    
+        
+    
+    #print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
         
         # with open(os.path.join(model_dir, f'CelebA_NetD_{epoch}.pkl'), 'wb') as f:
         #      torch.save(netD.state_dict(), f)

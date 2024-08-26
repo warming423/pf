@@ -1,3 +1,0 @@
-agrad
-prof
-stubs
